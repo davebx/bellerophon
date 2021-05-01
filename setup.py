@@ -5,7 +5,6 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="bellerophon",
-    version="1.0a",
     author="Dave Bouvier",
     author_email="dave@bx.psu.edu",
     description="Filter reads of a minimum quality that span a junction, retaining the 5´ side of that junction",
