@@ -4,17 +4,18 @@ import pysam
 import re
 import tempfile
 
-__version__ = '1.0b1'
+__version__ = '1.0b2'
 
 def filter_reads(args):
     retval = []
     forward_ids = []
     reverse_ids = []
+    save = pysam.set_verbosity(0)
     ffh = pysam.AlignmentFile(args.forward, 'r')
     rfh = pysam.AlignmentFile(args.reverse, 'r')
+    pysam.set_verbosity(save)
     for handle in [ffh, rfh]:
-        print('Processing reads in %s...' % handle.filename)
-        # print(handle.name)
+        print('Loading reads from %s...' % str(handle.filename))
         previous_read = None
         all_reads = []
         unmapped_reads = []
@@ -22,36 +23,33 @@ def filter_reads(args):
         three_reads = []
         mid_reads = []
         counter = 0
-        reads = 0
+        written_reads = 0
+        processed_reads = 0
         come_in_here = re.compile(r'^[0-9]*M')
         dear_boy = re.compile(r'.*M$')
         have_a_cigar = re.compile(r'^[0-9]*[HS].*M.*[HS]$') # You're gonna go far, you're gonna fly
-        outfile = tempfile.NamedTemporaryFile(prefix='filtered_', suffix='.bam', delete=False, dir=os.getcwd())
-        retval.append(outfile.name)
-        outfile.close()
-        outfh = pysam.AlignmentFile(outfile.name, 'wb', header=handle.header)
+        output_tempfile = tempfile.NamedTemporaryFile(prefix='filtered_', suffix='.bam', delete=False, dir=os.getcwd())
+        retval.append(output_tempfile.name)
+        output_tempfile.close()
+        output_fh = pysam.AlignmentFile(output_tempfile.name, 'wb', header=handle.header)
         for read in handle:
-            reads += 1
-            if reads % 10000 == 0:
-                print('Processed %d...' % reads)
-            # print(read.query_name)
-            # if read.query_name not in common_ids:
-            #     print('Discarding read with ID %s at line %d of %s because it is not present in both input files.' % (read.query_name, counter + 1, handle.name))
-            #     continue
+            processed_reads += 1
             # If this is 1. Not the first read, and 2. Not the previous read again:
             if previous_read is not None and read.query_name != previous_read:
                 # If we have more than one read in the current batch and one
                 # read is on the 5´ side of a ligation junction.
                 if counter in [1, 2] and len(five_reads) == 1:
                     # Serve it forth.
-                    outfh.write(five_reads[0])
+                    output_fh.write(five_reads[0])
+                    written_reads += 1
                 else:
                     # Get the most recent read, set the unmapped flag, and send it
                     # to the output file.
                     new_read = all_reads[0]
                     new_read.is_unmapped = 1
-                    outfh.write(new_read)
-                # Reset some variables to their original values.
+                    output_fh.write(new_read)
+                    written_reads += 1
+                # Reset these variables to their original values.
                 counter = 0
                 all_reads = []
                 unmapped_reads = []
@@ -82,42 +80,44 @@ def filter_reads(args):
             # And it is on the 5´ side of a ligation junction
             if len(five_reads) == 1:
                 # We send it to the output
-                outfh.write(five_reads[0])
+                output_fh.write(five_reads[0])
             else:
                 # Otherwise we flag it unmapped and push it out.
                 new_read = all_reads[0]
                 new_read.is_unmapped = 1
-                outfh.write(new_read)
+                output_fh.write(new_read)
+                written_reads += 1
         # Or if we have two reads and one of them is on the 5´ side of a junction.
         elif counter == 2 and len(five_reads) == 1:
             # We do.
-            outfh.write(five_reads[0])
+            output_fh.write(five_reads[0])
+            written_reads += 1
         else:
             # The same kind of thing.
             new_read = all_reads[0]
             new_read.is_unmapped = 1
-            outfh.write(new_read)
-    # And throw the filtered filenames back to the caller.
+            output_fh.write(new_read)
+            written_reads += 1
+        print('Processed %d reads and output %d.' % (processed_reads, written_reads))
+    # Send the filenames of the filtered alignments back to the caller.
     return retval
 
 def merge_bams(filtered_forward, filtered_reverse, output_file, quality):
+    save = pysam.set_verbosity(0)
     forward = pysam.AlignmentFile(filtered_forward, 'r')
     reverse = pysam.AlignmentFile(filtered_reverse, 'r')
-    outfile = pysam.AlignmentFile(output_file, 'wb', header=forward.header)
-    forward_check = str(forward.header)
+    pysam.set_verbosity(save)
+    output_fh = pysam.AlignmentFile(output_file, 'wb', header=forward.header)
     if str(forward.header) != str(reverse.header):
         print('Error: The input SAM headers do not match.')
         return 1
-    input_line = 0
-    skipped_reads = []
+    processed_reads = 0
+    skipped_reads = 0
     for forward_read, reverse_read in zip(forward, reverse):
         proper_pairs = 0
-        input_line += 1
-        if input_line % 100000 == 0:
-            print('Processed and merged %d reads, skipped %d with mismatched read names.' % (input_line, len(skipped_reads)))
         if forward_read.query_name != reverse_read.query_name:
             read_tups = forward_read.query_name, reverse_read.query_name
-            skipped_reads.append(read_tups)
+            skipped_reads += 1
             continue
         if (forward_read.is_unmapped or forward_read.mapping_quality < quality) or (reverse_read.is_unmapped or reverse_read.mapping_quality < quality):
             continue
@@ -162,9 +162,10 @@ def merge_bams(filtered_forward, filtered_reverse, output_file, quality):
         reverse_read.next_reference_start = forward_read.reference_start
         forward_read.template_length = forward_length
         reverse_read.template_length = reverse_length
-        outfile.write(forward_read)
-        outfile.write(reverse_read)
-    print('Skipped %d reads with non-matching read names.' % len(skipped_reads))
+        output_fh.write(forward_read)
+        output_fh.write(reverse_read)
+        processed_reads += 1
+    print('Processed and merged %d read pairs, skipped %d with mismatched read names.' % (processed_reads, skipped_reads))
     for filename in [filtered_forward, filtered_reverse]:
         os.unlink(filename)
     return 0
