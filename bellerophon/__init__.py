@@ -4,16 +4,19 @@ import pysam
 import re
 import tempfile
 
-__version__ = '1.0b2'
+__version__ = '1.0rc0'
 
 def filter_reads(args):
     retval = []
     forward_ids = []
     reverse_ids = []
     save = pysam.set_verbosity(0)
-    ffh = pysam.AlignmentFile(args.forward, 'r')
-    rfh = pysam.AlignmentFile(args.reverse, 'r')
+    ffh = pysam.AlignmentFile(args.forward, 'r', threads=args.threads)
+    rfh = pysam.AlignmentFile(args.reverse, 'r', threads=args.threads)
     pysam.set_verbosity(save)
+    if ffh.header.references != rfh.header.references or ffh.header.lengths != rfh.header.lengths:
+        print('Error: The input files do not have the same sequence names or lengths.')
+        return 1
     for handle in [ffh, rfh]:
         print('Loading reads from %s...' % str(handle.filename))
         previous_read = None
@@ -102,15 +105,12 @@ def filter_reads(args):
     # Send the filenames of the filtered alignments back to the caller.
     return retval
 
-def merge_bams(filtered_forward, filtered_reverse, output_file, quality):
+def merge_bams(args, filtered_forward, filtered_reverse):
     save = pysam.set_verbosity(0)
-    forward = pysam.AlignmentFile(filtered_forward, 'r')
-    reverse = pysam.AlignmentFile(filtered_reverse, 'r')
+    forward = pysam.AlignmentFile(filtered_forward, 'r', threads=args.threads)
+    reverse = pysam.AlignmentFile(filtered_reverse, 'r', threads=args.threads)
     pysam.set_verbosity(save)
-    output_fh = pysam.AlignmentFile(output_file, 'wb', header=forward.header)
-    if str(forward.header) != str(reverse.header):
-        print('Error: The input SAM headers do not match.')
-        return 1
+    output_fh = pysam.AlignmentFile(args.output, 'wb', header=forward.header)
     processed_reads = 0
     skipped_reads = 0
     for forward_read, reverse_read in zip(forward, reverse):
@@ -119,9 +119,9 @@ def merge_bams(filtered_forward, filtered_reverse, output_file, quality):
             read_tups = forward_read.query_name, reverse_read.query_name
             skipped_reads += 1
             continue
-        if (forward_read.is_unmapped or forward_read.mapping_quality < quality) or (reverse_read.is_unmapped or reverse_read.mapping_quality < quality):
+        if (forward_read.is_unmapped or forward_read.mapping_quality < args.quality) or (reverse_read.is_unmapped or reverse_read.mapping_quality < args.quality):
             continue
-        if False not in [forward_read.is_unmapped, reverse_read.is_unmapped]:
+        if not forward_read.is_unmapped or reverse_read.is_unmapped:
             proper_pairs = 1
             if forward_read.reference_id == reverse_read.reference_id:
                 distance = abs(forward_read.reference_start - reverse_read.reference_start)
@@ -142,24 +142,32 @@ def merge_bams(filtered_forward, filtered_reverse, output_file, quality):
         # Update some of the AlignedSegment attributes.
         forward_read.is_secondary = 0
         reverse_read.is_secondary = 0
+        forward_read.is_unmapped = 0
+        reverse_read.is_unmapped = 0
+        forward_read.is_reverse = 0
+        reverse_read.is_reverse = 0
+        forward_read.is_supplementary = 0
+        reverse_read.is_supplementary = 0
         forward_read.is_read1 = 1
         reverse_read.is_read2 = 1
         reverse_read.is_read1 = 0
         forward_read.is_read2 = 0
-        forward_mate_is_reverse = forward_read.mate_is_reverse
-        reverse_mate_is_reverse = reverse_read.mate_is_reverse
-        forward_read.is_reverse = reverse_mate_is_reverse
-        reverse_read.is_reverse = forward_mate_is_reverse
-        forward_mate_is_unmapped = forward_read.mate_is_unmapped
-        reverse_mate_is_unmapped = reverse_read.mate_is_unmapped
-        forward_read.is_unmapped = reverse_mate_is_unmapped
-        reverse_read.is_unmapped = forward_mate_is_unmapped
+        reverse_read.is_unmapped = forward_read.is_unmapped
+        forward_read.is_unmapped = reverse_read.is_unmapped
+        forward_read.mate_is_unmapped = forward_read.is_unmapped
+        reverse_read.mate_is_unmapped = reverse_read.is_unmapped
+        forward_read.is_reverse = 0
+        reverse_read.is_reverse = 1
+        forward_read.mate_is_reverse = 1
+        reverse_read.mate_is_reverse = 0
         forward_read.is_proper_pair = proper_pairs
         reverse_read.is_proper_pair = proper_pairs
         forward_read.is_paired = 1
         reverse_read.is_paired = 1
         forward_read.next_reference_start = reverse_read.reference_start
         reverse_read.next_reference_start = forward_read.reference_start
+        forward_read.next_reference_name = reverse_read.reference_name
+        reverse_read.next_reference_name = forward_read.reference_name
         forward_read.template_length = forward_length
         reverse_read.template_length = reverse_length
         output_fh.write(forward_read)
