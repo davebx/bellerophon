@@ -1,15 +1,17 @@
-import argparse
 import os
 import pysam
 import re
 import tempfile
+import time
+from collections import OrderedDict
 
-__version__ = '1.0rc1'
+
+__version__ = '1.0rc2'
+__description__ = 'Merge and filter reads where there is high quality mapping on both sides of a ligation junction, retaining the 5-prime side.'
+
 
 def filter_reads(args):
     retval = []
-    forward_ids = []
-    reverse_ids = []
     save = pysam.set_verbosity(0)
     ffh = pysam.AlignmentFile(args.forward, 'r', threads=args.threads)
     rfh = pysam.AlignmentFile(args.reverse, 'r', threads=args.threads)
@@ -19,6 +21,8 @@ def filter_reads(args):
         return 1
     for handle in [ffh, rfh]:
         print('Loading reads from %s...' % str(handle.filename))
+        processed_reads = 0
+        written_reads = 0
         previous_read = None
         all_reads = []
         unmapped_reads = []
@@ -26,15 +30,14 @@ def filter_reads(args):
         three_reads = []
         mid_reads = []
         counter = 0
-        written_reads = 0
-        processed_reads = 0
         come_in_here = re.compile(r'^[0-9]*M')
         dear_boy = re.compile(r'.*M$')
-        have_a_cigar = re.compile(r'^[0-9]*[HS].*M.*[HS]$') # You're gonna go far, you're gonna fly
+        have_a_cigar = re.compile(r'^[0-9]*[HS].*M.*[HS]$')  # You're gonna go far, you're gonna fly
         output_tempfile = tempfile.NamedTemporaryFile(prefix='filtered_', suffix='.bam', delete=False, dir=os.getcwd())
         retval.append(output_tempfile.name)
         output_tempfile.close()
         output_fh = pysam.AlignmentFile(output_tempfile.name, 'wb', header=handle.header)
+        starttime = time.time()
         for read in handle:
             processed_reads += 1
             # If this is 1. Not the first read, and 2. Not the previous read again:
@@ -101,25 +104,47 @@ def filter_reads(args):
             new_read.is_unmapped = 1
             output_fh.write(new_read)
             written_reads += 1
-        print('Processed %d reads and output %d.' % (processed_reads, written_reads))
+        print('Processed %d reads in %f seconds and output %d.' % (processed_reads, time.time() - starttime, written_reads))
     # Send the filenames of the filtered alignments back to the caller.
     return retval
 
+
 def merge_bams(args, filtered_forward, filtered_reverse):
+    previous = None
     save = pysam.set_verbosity(0)
     forward = pysam.AlignmentFile(filtered_forward, 'r', threads=args.threads)
     reverse = pysam.AlignmentFile(filtered_reverse, 'r', threads=args.threads)
     pysam.set_verbosity(save)
-    output_fh = pysam.AlignmentFile(args.output, 'wb', header=forward.header)
+    new_header = OrderedDict(forward.header)
+    if 'PG' in new_header:
+        last_pg = new_header['PG'][-1]
+        previous = last_pg['ID']
+    command = 'bellerophon --forward %s --reverse %s --output %s --quality %s' % \
+        (os.path.split(args.forward)[-1], os.path.split(args.reverse)[-1], os.path.split(args.output)[-1], args.quality)
+    new_pg = dict(ID=__name__, PN=__name__, PP=None, VN=__version__, CL=command, DS=__description__)
+    if previous is not None:
+        new_pg['PP'] = previous
+        new_pg = new_header['PG'] + [OrderedDict(new_pg)]
+    else:
+        new_pg = new_header['PG'] + [OrderedDict(ID=__name__, PN=__name__, VN=__version__, CL=command, DS=__description__)]
+    new_header['PG'] = new_pg
+    output_fh = pysam.AlignmentFile(args.output, 'wb', header=pysam.AlignmentHeader.from_dict(new_header))
     processed_reads = 0
-    skipped_reads = 0
+    mismatched_reads = 0
+    unmapped_reads = 0
+    low_quality_reads = 0
+    starttime = time.time()
     for forward_read, reverse_read in zip(forward, reverse):
         proper_pairs = 0
         # Skip reads that aren't the same, are unmapped, or are less than --quality
         if forward_read.query_name != reverse_read.query_name:
-            skipped_reads += 1
+            mismatched_reads += 1
             continue
-        if (forward_read.is_unmapped or forward_read.mapping_quality < args.quality) or (reverse_read.is_unmapped or reverse_read.mapping_quality < args.quality):
+        if forward_read.is_unmapped or reverse_read.is_unmapped:
+            unmapped_reads += 1
+            continue
+        if forward_read.mapping_quality < args.quality or reverse_read.mapping_quality < args.quality:
+            low_quality_reads += 1
             continue
         if not forward_read.is_unmapped or reverse_read.is_unmapped:
             proper_pairs = 1
@@ -161,10 +186,8 @@ def merge_bams(args, filtered_forward, filtered_reverse):
         forward_read.is_unmapped = reverse_is_unmapped
         forward_read.mate_is_unmapped = forward_is_unmapped
         reverse_read.mate_is_unmapped = reverse_is_unmapped
-        reverse_read.is_reverse = forward_is_reverse
-        forward_read.is_reverse = reverse_is_reverse
-        forward_read.mate_is_reverse = forward_is_reverse
-        reverse_read.mate_is_reverse = reverse_is_reverse
+        forward_read.mate_is_reverse = reverse_is_reverse
+        reverse_read.mate_is_reverse = forward_is_reverse
         # Set them to paired and properly paired.
         forward_read.is_proper_pair = proper_pairs
         reverse_read.is_proper_pair = proper_pairs
@@ -181,7 +204,9 @@ def merge_bams(args, filtered_forward, filtered_reverse):
         output_fh.write(forward_read)
         output_fh.write(reverse_read)
         processed_reads += 1
-    print('Processed and merged %d read pairs, skipped %d with mismatched read names.' % (processed_reads, skipped_reads))
+    print('Successfully merged %d read pairs in %f seconds.' % (processed_reads, time.time() - starttime))
+    print('Skipped %d pairs with mismatched read names, %d unmapped reads, and %d with a mapping quality below %d.' %
+          (mismatched_reads, unmapped_reads, low_quality_reads, args.quality))
     for filename in [filtered_forward, filtered_reverse]:
         os.unlink(filename)
     return 0
