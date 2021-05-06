@@ -4,7 +4,7 @@ import pysam
 import re
 import tempfile
 
-__version__ = '1.0rc0'
+__version__ = '1.0rc1'
 
 def filter_reads(args):
     retval = []
@@ -115,14 +115,15 @@ def merge_bams(args, filtered_forward, filtered_reverse):
     skipped_reads = 0
     for forward_read, reverse_read in zip(forward, reverse):
         proper_pairs = 0
+        # Skip reads that aren't the same, are unmapped, or are less than --quality
         if forward_read.query_name != reverse_read.query_name:
-            read_tups = forward_read.query_name, reverse_read.query_name
             skipped_reads += 1
             continue
         if (forward_read.is_unmapped or forward_read.mapping_quality < args.quality) or (reverse_read.is_unmapped or reverse_read.mapping_quality < args.quality):
             continue
         if not forward_read.is_unmapped or reverse_read.is_unmapped:
             proper_pairs = 1
+            # Get the proper distances and lengths, since they may be off now.
             if forward_read.reference_id == reverse_read.reference_id:
                 distance = abs(forward_read.reference_start - reverse_read.reference_start)
                 if forward_read.reference_start >= reverse_read.reference_start:
@@ -139,35 +140,42 @@ def merge_bams(args, filtered_forward, filtered_reverse):
             proper_pairs = 0
             forward_length = 0
             reverse_length = 0
-        # Update some of the AlignedSegment attributes.
+        # Zero the right flags for the forward and reverse reads.
         forward_read.is_secondary = 0
         reverse_read.is_secondary = 0
         forward_read.is_unmapped = 0
         reverse_read.is_unmapped = 0
-        forward_read.is_reverse = 0
-        reverse_read.is_reverse = 0
         forward_read.is_supplementary = 0
         reverse_read.is_supplementary = 0
+        # Make sure each one has the right flag for read number.
         forward_read.is_read1 = 1
         reverse_read.is_read2 = 1
         reverse_read.is_read1 = 0
         forward_read.is_read2 = 0
-        reverse_read.is_unmapped = forward_read.is_unmapped
-        forward_read.is_unmapped = reverse_read.is_unmapped
-        forward_read.mate_is_unmapped = forward_read.is_unmapped
-        reverse_read.mate_is_unmapped = reverse_read.is_unmapped
-        forward_read.is_reverse = 0
-        reverse_read.is_reverse = 1
-        forward_read.mate_is_reverse = 1
-        reverse_read.mate_is_reverse = 0
+        # Swap the mapped and reverse attributes between reads.
+        reverse_is_unmapped = reverse_read.is_unmapped
+        forward_is_unmapped = forward_read.is_unmapped
+        reverse_is_reverse = reverse_read.is_reverse
+        forward_is_reverse = forward_read.is_reverse
+        reverse_read.is_unmapped = forward_is_unmapped
+        forward_read.is_unmapped = reverse_is_unmapped
+        forward_read.mate_is_unmapped = forward_is_unmapped
+        reverse_read.mate_is_unmapped = reverse_is_unmapped
+        reverse_read.is_reverse = forward_is_reverse
+        forward_read.is_reverse = reverse_is_reverse
+        forward_read.mate_is_reverse = forward_is_reverse
+        reverse_read.mate_is_reverse = reverse_is_reverse
+        # Set them to paired and properly paired.
         forward_read.is_proper_pair = proper_pairs
         reverse_read.is_proper_pair = proper_pairs
         forward_read.is_paired = 1
         reverse_read.is_paired = 1
-        forward_read.next_reference_start = reverse_read.reference_start
+        # Set the next reference for the reads to each other.
+        reverse_read.next_reference_id = forward_read.reference_id
+        forward_read.next_reference_id = reverse_read.reference_id
         reverse_read.next_reference_start = forward_read.reference_start
-        forward_read.next_reference_name = reverse_read.reference_name
-        reverse_read.next_reference_name = forward_read.reference_name
+        forward_read.next_reference_start = reverse_read.reference_start
+        # And update the length that we calculated above.
         forward_read.template_length = forward_length
         reverse_read.template_length = reverse_length
         output_fh.write(forward_read)
