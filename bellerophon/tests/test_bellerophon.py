@@ -23,8 +23,7 @@ class TestBellerophon(TestCase):
         input_reverse_reads = os.path.abspath('test_data/test_1500_reverse.bam')
         self.test_filtered_forward_reads = os.path.abspath('test_data/test_1500_filtered_forward.bam')
         self.test_filtered_reverse_reads = os.path.abspath('test_data/test_1500_filtered_reverse.bam')
-        self.output_tempfile = tempfile.NamedTemporaryFile(prefix='test_filtered_merged_', suffix='.bam', delete=False, dir=os.getcwd())
-        args = ['--forward', input_forward_reads, '--reverse', input_reverse_reads, '--output', self.output_tempfile.name, '--quality', '10', '--log-level', 'DEBUG']
+        args = ['--forward', input_forward_reads, '--reverse', input_reverse_reads, '--output', '/dev/null', '--quality', '10', '--log-level', 'DEBUG']
         self.arguments = parser.parse_args(args)
 
     def test_filter(self):
@@ -43,17 +42,24 @@ class TestBellerophon(TestCase):
     def test_merge(self):
         test_file = os.path.abspath('test_data/test_1500_merged_reads.bam')
         output_filtered_forward, output_filtered_reverse = filter_reads(self.arguments)
+        output_tempfile = tempfile.NamedTemporaryFile(prefix='test_filtered_merged_', suffix='.bam', delete=False, dir=os.getcwd())
+        output_tempfile.close()
+        self.arguments.output = os.path.abspath(output_tempfile.name)
         merged_output = merge_bams(self.arguments, output_filtered_forward, output_filtered_reverse)
         self.assertEqual(merged_output, 0)
         save = pysam.set_verbosity(0)
         test_out_fh = pysam.AlignmentFile(self.arguments.output, 'r')
         test_cmp_fh = pysam.AlignmentFile(test_file, 'r')
         pysam.set_verbosity(save)
+        print(self.arguments.output)
         # Compare each read individually since bellerophon.merge_bams()
         # adds a row to the @PG section of the SAM header, making the checksums differ.
         for output_read, test_read in zip(test_out_fh, test_cmp_fh):
             self.assertEqual(output_read, test_read)
+        test_out_fh.close()
+        test_cmp_fh.close()
         os.unlink(self.arguments.output)
+        self.assertFalse(os.path.exists(self.arguments.output))
 
     def _hash_files(self, out_file, cmp_file):
         with open(out_file, 'rb') as fh:

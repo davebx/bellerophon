@@ -1,24 +1,34 @@
-name: Run nose tests
+name: Run tests
 
 on: [push, pull_request]
 
 jobs:
-  build:
-
+  test:
+    name: Test python scripts
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: [3.6,3.7,3.8,3.9]
-
     steps:
+    - name: Cache pip
+      uses: actions/cache@v2
+      env:
+        cache-name: cache-python-deps
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-${{ env.cache-name }}-${{ matrix.python-version }}
+        restore-keys: |
+          ${{ runner.os }}-${{ env.cache-name }}-${{ matrix.python-version }}
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Install wheel
+      run: |
+        python -m pip install --upgrade pip wheel
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install flake8 pytest pysam coveralls
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with flake8
@@ -29,12 +39,25 @@ jobs:
       run: |
         coverage run --source=bellerophon -m pytest --junit-xml=junit_test_results_${{ matrix.python-version }}.xml
     - name: 'Test Coverage Report: Python ${{ matrix.python-version }}'
-      uses: coverallsapp/github-action@master
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+      run: coveralls --service=github
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COVERALLS_FLAG_NAME: ${{ matrix.python-version }}
+        COVERALLS_PARALLEL: true
     - name: 'jUnit Test Results: Python ${{ matrix.python-version }}'
       uses: actions/upload-artifact@v2
       with:
         name: jUnit Test Results
         path: junit_test_results_${{ matrix.python-version }}.xml
       if: ${{ always() }}
+  coveralls:
+    name: Report test completion
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+    - name: Report completion to coveralls.io
+      run: |
+        pip3 install --upgrade coveralls
+        coveralls --service=github --finish
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -9,7 +9,7 @@ from collections import OrderedDict
 
 
 log = logging.getLogger(__name__)
-__version__ = '1.0rc2'
+__version__ = '1.0rc3'
 __description__ = 'Filter two single-end BAM, SAM, or CRAM files for reads where ' + \
                   'there is high-quality mapping on both sides of a ligation ' + \
                   'junction, retaining the 5´ side of that mapping, then merge ' + \
