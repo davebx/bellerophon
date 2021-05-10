@@ -1,29 +1,21 @@
-name: Deploy to Test-PyPi
+name: Run tests
 
-on:
-  release:
-    types: [created]
+on: [push, pull_request]
 
 jobs:
   test:
-    name: Test release
+    name: Test python scripts
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: 3.9
     steps:
-    - name: Get the version tag for the release
-      id: get_version
-      run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/}
     - name: Cache pip
       uses: actions/cache@v2
       env:
         cache-name: cache-python-deps
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-${{ env.cache-name }}-py3.9-release-${{ VERSION }}
+        key: ${{ runner.os }}-${{ env.cache-name }}-release-3.9
         restore-keys: |
-          ${{ runner.os }}-${{ env.cache-name }}-py3.9-release-${{ VERSION }}
+          ${{ runner.os }}-${{ env.cache-name }}-release-3.9
     - uses: actions/checkout@v2
     - name: Set up Python
       uses: actions/setup-python@v2
@@ -42,7 +34,7 @@ jobs:
         flake8 . --count --show-source --statistics
     - name: Test with pytest
       run: |
-        pytest --junit-xml=junit_test_results.xml
+        coverage run --source=bellerophon -m pytest --junit-xml=junit_test_results.xml
     - name: 'jUnit Test Results'
       uses: actions/upload-artifact@v2
       with:
