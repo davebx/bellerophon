@@ -27,7 +27,7 @@ jobs:
         flake8 . --count --show-source --statistics
     - name: Test with pytest
       run: |
-        pytest --cov=bellerophon --junit-xml=junit_test_results_${{ matrix.python-version }}.xml --cov-report=coverage_${{ matrix.python-version }}.xml
+        pytest --cov=bellerophon --junit-xml=junit_test_results_${{ matrix.python-version }}.xml --cov-report=xml
     - name: 'Test Coverage Report: Python ${{ matrix.python-version }}'
       uses: coverallsapp/github-action@master
       with:
