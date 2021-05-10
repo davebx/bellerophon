@@ -11,6 +11,8 @@ setuptools.setup(
     install_requires=['pysam'],
     long_description=long_description,
     long_description_content_type="text/markdown",
+    test_suite='nose.collector',
+    tests_require=['nose'],
     url="https://github.com/davebx/bellerophon",
     packages=['bellerophon'],
     entry_points={'console_scripts': ['bellerophon=bellerophon.cli:main']},

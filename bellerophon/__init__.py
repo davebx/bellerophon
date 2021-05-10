@@ -1,26 +1,38 @@
+import logging
 import os
 import pysam
 import re
+import sys
 import tempfile
 import time
 from collections import OrderedDict
 
 
+log = logging.getLogger(__name__)
 __version__ = '1.0rc2'
-__description__ = 'Merge and filter reads where there is high quality mapping on both sides of a ligation junction, retaining the 5-prime side.'
+__description__ = 'Filter two single-end BAM, SAM, or CRAM files for reads where ' + \
+                  'there is high-quality mapping on both sides of a ligation ' + \
+                  'junction, retaining the 5´ side of that mapping, then merge ' + \
+                  'them into one paired-end BAM file. '
+handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+log.addHandler(handler)
 
 
 def filter_reads(args):
+    log.setLevel(args.log_level)
     retval = []
     save = pysam.set_verbosity(0)
     ffh = pysam.AlignmentFile(args.forward, 'r', threads=args.threads)
     rfh = pysam.AlignmentFile(args.reverse, 'r', threads=args.threads)
     pysam.set_verbosity(save)
     if ffh.header.references != rfh.header.references or ffh.header.lengths != rfh.header.lengths:
-        print('Error: The input files do not have the same sequence names or lengths.')
+        log.error('The input files do not have the same sequence names or lengths.')
         return 1
     for handle in [ffh, rfh]:
-        print('Loading reads from %s...' % str(handle.filename))
+        filename = os.path.split(os.path.abspath(handle.filename.decode('utf-8')))[-1]
+        log.info('Loading reads from %s...' % filename)
         processed_reads = 0
         written_reads = 0
         previous_read = None
@@ -104,7 +116,7 @@ def filter_reads(args):
             new_read.is_unmapped = 1
             output_fh.write(new_read)
             written_reads += 1
-        print('Processed %d reads in %f seconds and output %d.' % (processed_reads, time.time() - starttime, written_reads))
+        log.debug('Processed %d reads in %f seconds and output %d.' % (processed_reads, time.time() - starttime, written_reads))
     # Send the filenames of the filtered alignments back to the caller.
     return retval
 
@@ -204,9 +216,9 @@ def merge_bams(args, filtered_forward, filtered_reverse):
         output_fh.write(forward_read)
         output_fh.write(reverse_read)
         processed_reads += 1
-    print('Successfully merged %d read pairs in %f seconds.' % (processed_reads, time.time() - starttime))
-    print('Skipped %d pairs with mismatched read names, %d unmapped reads, and %d with a mapping quality below %d.' %
-          (mismatched_reads, unmapped_reads, low_quality_reads, args.quality))
+    log.info('Successfully merged %d read pairs in %f seconds.' % (processed_reads, time.time() - starttime))
+    log.debug('Skipped %d pairs with mismatched read names, %d unmapped reads, and %d with a mapping quality below %d.' %
+              (mismatched_reads, unmapped_reads, low_quality_reads, args.quality))
     for filename in [filtered_forward, filtered_reverse]:
         os.unlink(filename)
     return 0
