@@ -49,7 +49,6 @@ jobs:
       uses: pypa/gh-action-pypi-publish@master
       with:
         password: ${{ secrets.PYPI_API_KEY }}
-        repository_url: https://pypi.org/legacy/
     - name: 'Upload jUnit Test Results'
       uses: actions/upload-artifact@v2
       with:
