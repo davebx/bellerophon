@@ -1,4 +1,4 @@
-name: Publish and test release
+name: Test and publish release
 
 on:
   release:
@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    name: Test Release
+    name: Test and Publish Release
     runs-on: ubuntu-latest
     steps:
     - name: Cache pip
@@ -34,7 +34,7 @@ jobs:
       run: |
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --show-source --statistics
-    - name: Test with pytest
+    - name: Run tests
       run: |
         coverage run --source=bellerophon -m pytest --junit-xml=junit_test_results.xml
     - name: Build source tarball and wheel
@@ -50,7 +50,7 @@ jobs:
       with:
         password: ${{ secrets.PYPI_API_KEY }}
         repository_url: https://pypi.org/legacy/
-    - name: 'jUnit Test Results'
+    - name: 'Upload jUnit Test Results'
       uses: actions/upload-artifact@v2
       with:
         name: jUnit Test Results

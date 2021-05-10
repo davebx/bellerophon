@@ -38,13 +38,13 @@ jobs:
     - name: Test with pytest
       run: |
         coverage run --source=bellerophon -m pytest --junit-xml=junit_test_results_${{ matrix.python-version }}.xml
-    - name: 'Test Coverage Report: Python ${{ matrix.python-version }}'
+    - name: 'Report test coverage: Python ${{ matrix.python-version }}'
       run: coveralls --service=github
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        COVERALLS_FLAG_NAME: ${{ matrix.python-version }}
+        COVERALLS_FLAG_NAME: py${{ matrix.python-version }}
         COVERALLS_PARALLEL: true
-    - name: 'jUnit Test Results: Python ${{ matrix.python-version }}'
+    - name: 'Upload jUnit test results: Python ${{ matrix.python-version }}'
       uses: actions/upload-artifact@v2
       with:
         name: jUnit Test Results
