@@ -18,6 +18,9 @@ handler = logging.StreamHandler(sys.stdout)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 log.addHandler(handler)
+come_in_here = re.compile(r'^[0-9]*M')
+dear_boy = re.compile(r'.*M$')
+have_a_cigar = re.compile(r'^[0-9]*[HS].*M.*[HS]$')  # You're gonna go far, you're gonna fly
 
 
 def filter_reads(args):
@@ -42,9 +45,6 @@ def filter_reads(args):
         three_reads = []
         mid_reads = []
         counter = 0
-        come_in_here = re.compile(r'^[0-9]*M')
-        dear_boy = re.compile(r'.*M$')
-        have_a_cigar = re.compile(r'^[0-9]*[HS].*M.*[HS]$')  # You're gonna go far, you're gonna fly
         output_tempfile = tempfile.NamedTemporaryFile(prefix='filtered_', suffix='.bam', delete=False, dir=os.getcwd())
         retval.append(output_tempfile.name)
         output_tempfile.close()
@@ -52,21 +52,20 @@ def filter_reads(args):
         starttime = time.time()
         for read in handle:
             processed_reads += 1
-            # If this is 1. Not the first read, and 2. Not the previous read again:
+            # If the read is unmapped, or the mapping quality is too low, discard it.
+            if read.mapping_quality < args.quality:
+                continue
+            if read.is_unmapped:
+                continue
+            # If we are processing reads, and this is not the second read in a pair.
             if previous_read is not None and read.query_name != previous_read:
-                # If we have more than one read in the current batch and one
-                # read is on the 5´ side of a ligation junction.
+                # If the previous read is on the 5´ side of a ligation junction.
                 if counter in [1, 2] and len(five_reads) == 1:
                     # Serve it forth.
                     output_fh.write(five_reads[0])
                     written_reads += 1
                 else:
-                    # Get the most recent read, set the unmapped flag, and send it
-                    # to the output file.
-                    new_read = all_reads[0]
-                    new_read.is_unmapped = 1
-                    output_fh.write(new_read)
-                    written_reads += 1
+                    continue
                 # Reset these variables to their original values.
                 counter = 0
                 all_reads = []
@@ -77,48 +76,48 @@ def filter_reads(args):
             counter += 1
             all_reads.append(read)
             previous_read = read.query_name
-            # Determine whether read is unmapped, or has mapped reads spanning a junction
-            if read.is_unmapped:
-                unmapped_reads.append(read)
             # If the read is aligned - and has mapped reads at the end, or it is
             # aligned + and has mapped reads at the beginning, it goes in the 5´
             # bin and is retained.
-            elif (read.is_reverse and dear_boy.match(read.cigarstring) is not None) or (not read.is_reverse and come_in_here.match(read.cigarstring) is not None):
+            if _is_five_prime(read):
                 five_reads.append(read)
-            # If the read is aligned + and has mapped reads at the end, or it is
-            # aligned - and has mapped reads at the beginning, it goes in the 3´
-            # bin and is discarded.
-            elif (read.is_reverse and come_in_here.match(read.cigarstring) is not None) or (not read.is_reverse and dear_boy.match(read.cigarstring) is not None):
-                three_reads.append(read)
-            # If it has mapped reads in the middle, put it in that list.
-            elif have_a_cigar.match(read.cigarstring):
-                mid_reads.append(read)
-        # If we have a read.
+            else:
+                continue
+        # If that was also a read.
         if counter == 1:
             # And it is on the 5´ side of a ligation junction
             if len(five_reads) == 1:
                 # We send it to the output
                 output_fh.write(five_reads[0])
             else:
-                # Otherwise we flag it unmapped and push it out.
-                new_read = all_reads[0]
-                new_read.is_unmapped = 1
-                output_fh.write(new_read)
-                written_reads += 1
+                continue
         # Or if we have two reads and one of them is on the 5´ side of a junction.
         elif counter == 2 and len(five_reads) == 1:
             # We do.
             output_fh.write(five_reads[0])
             written_reads += 1
         else:
-            # The same kind of thing.
-            new_read = all_reads[0]
-            new_read.is_unmapped = 1
-            output_fh.write(new_read)
-            written_reads += 1
+            continue
         log.debug('Processed %d reads in %f seconds and output %d.' % (processed_reads, time.time() - starttime, written_reads))
     # Send the filenames of the filtered alignments back to the caller.
     return retval
+
+def _is_five_prime(alignedsegment):
+    retval = _tail_maps(alignedsegment) if alignedsegment.is_reverse else _head_maps(alignedsegment)
+    return retval
+
+def _is_three_prime(alignedsegment):
+    retval = _head_maps(alignedsegment) if alignedsegment.is_reverse else _tail_maps(alignedsegment)
+    return retval
+
+def _head_maps(alignedsegment):
+    return come_in_here.match(str(alignedsegment.cigarstring)) is not None
+
+def _tail_maps(alignedsegment):
+    return dear_boy.match(str(alignedsegment.cigarstring)) is not None
+
+def _middle_maps(alignedsegment):
+    return have_a_cigar.match(str(alignedsegment.cigarstring)) is not None
 
 
 def merge_bams(args, filtered_forward, filtered_reverse):
@@ -151,12 +150,6 @@ def merge_bams(args, filtered_forward, filtered_reverse):
         # Skip reads that aren't the same, are unmapped, or are less than --quality
         if forward_read.query_name != reverse_read.query_name:
             mismatched_reads += 1
-            continue
-        if forward_read.is_unmapped or reverse_read.is_unmapped:
-            unmapped_reads += 1
-            continue
-        if forward_read.mapping_quality < args.quality or reverse_read.mapping_quality < args.quality:
-            low_quality_reads += 1
             continue
         if not forward_read.is_unmapped or reverse_read.is_unmapped:
             proper_pairs = 1

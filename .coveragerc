@@ -1,3 +1,3 @@
 [run]
 omit = bellerophon/cli.py
-       bellerophon/tests/*
+       tests/*
