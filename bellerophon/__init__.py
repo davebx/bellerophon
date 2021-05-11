@@ -40,10 +40,7 @@ def filter_reads(args):
         written_reads = 0
         previous_read = None
         all_reads = []
-        unmapped_reads = []
         five_reads = []
-        three_reads = []
-        mid_reads = []
         counter = 0
         output_tempfile = tempfile.NamedTemporaryFile(prefix='filtered_', suffix='.bam', delete=False, dir=os.getcwd())
         retval.append(output_tempfile.name)
@@ -69,10 +66,6 @@ def filter_reads(args):
                 # Reset these variables to their original values.
                 counter = 0
                 all_reads = []
-                unmapped_reads = []
-                five_reads = []
-                three_reads = []
-                mid_reads = []
             counter += 1
             all_reads.append(read)
             previous_read = read.query_name
@@ -102,19 +95,24 @@ def filter_reads(args):
     # Send the filenames of the filtered alignments back to the caller.
     return retval
 
+
 def _is_five_prime(alignedsegment):
     retval = _tail_maps(alignedsegment) if alignedsegment.is_reverse else _head_maps(alignedsegment)
     return retval
+
 
 def _is_three_prime(alignedsegment):
     retval = _head_maps(alignedsegment) if alignedsegment.is_reverse else _tail_maps(alignedsegment)
     return retval
 
+
 def _head_maps(alignedsegment):
     return come_in_here.match(str(alignedsegment.cigarstring)) is not None
 
+
 def _tail_maps(alignedsegment):
     return dear_boy.match(str(alignedsegment.cigarstring)) is not None
+
 
 def _middle_maps(alignedsegment):
     return have_a_cigar.match(str(alignedsegment.cigarstring)) is not None
