@@ -18,7 +18,7 @@ setuptools.setup(
     entry_points={'console_scripts': ['bellerophon=bellerophon.cli:main']},
     classifiers=[
         "Programming Language :: Python :: 3",
-        'License :: OSI Approved :: Academic Free License (AFL)',
+        'License :: OSI Approved :: MIT License',
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.6',
